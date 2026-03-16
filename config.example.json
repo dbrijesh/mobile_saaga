@@ -1,0 +1,34 @@
+{
+  "api": {
+    "baseUrl": "https://0vdwl01ssb.execute-api.ap-southeast-1.amazonaws.com/dev",
+    "region": "ap-southeast-1",
+    "timeout": 30000
+  },
+  "cognito": {
+    "userPoolId": "ap-southeast-1_iORsaH7z5",
+    "clientId": "1okf8v98qb005jvr14lalhankj",
+    "region": "ap-southeast-1",
+    "identityPoolId": null
+  },
+  "stripe": {
+    "publishableKey": "pk_test_your_publishable_key_here",
+    "merchantDisplayName": "Saaga Groceries",
+    "countryCode": "SG"
+  },
+  "app": {
+    "name": "Saaga Groceries",
+    "currency": "SGD",
+    "language": "en",
+    "theme": "light"
+  },
+  "endpoints": {
+    "products": "/products",
+    "categories": "/categories",
+    "cart": "/cart",
+    "orders": "/orders",
+    "payment": "/payment",
+    "addresses": "/addresses",
+    "profile": "/user/profile",
+    "support": "/support"
+  }
+}

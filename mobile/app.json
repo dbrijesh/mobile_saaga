@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Saaga Online",
+    "slug": "saaga-online",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FF6B35"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.saaga.online"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FF6B35"
+      },
+      "package": "com.saaga.online",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "apiUrl": "https://cfrgxy85j4.execute-api.ap-southeast-1.amazonaws.com/dev",
+      "apiKey": "PS6yscP59p41QJb30ZYQGkIhAcVzgCwaSBgEqqne",
+      "cognitoUserPoolId": "ap-southeast-1_1BQKFzF5m",
+      "cognitoClientId": "55rqmd54dphlke870t28ma9nju",
+      "awsRegion": "ap-southeast-1",
+      "stripePublishableKey": "pk_test_your_publishable_key_here"
+    }
+  }
+}

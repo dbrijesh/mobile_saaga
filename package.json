@@ -1,0 +1,37 @@
+{
+  "name": "saaga-groceries-platform",
+  "version": "1.0.0",
+  "description": "Complete e-commerce platform for Indian groceries in Singapore",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "mobile",
+    "admin",
+    "scripts"
+  ],
+  "scripts": {
+    "setup": "npm install && cd backend && npm install && cd ../mobile && npm install && cd ../admin && npm install && cd ../scripts && npm install",
+    "convert-data": "cd scripts && npm run convert",
+    "backend:deploy": "cd backend && npm run deploy:dev",
+    "backend:deploy:prod": "cd backend && npm run deploy:prod",
+    "mobile:start": "cd mobile && npx expo start",
+    "mobile:ios": "cd mobile && npx expo start --ios",
+    "mobile:android": "cd mobile && npx expo start --android",
+    "admin:dev": "cd admin && npm run dev",
+    "admin:build": "cd admin && npm run build"
+  },
+  "keywords": [
+    "e-commerce",
+    "react-native",
+    "aws",
+    "serverless",
+    "groceries",
+    "stripe"
+  ],
+  "dependencies": {
+    "@expo/config-plugins": "^54.0.4",
+    "expo": "~54.0.0",
+    "react-native-worklets": "^0.7.1",
+    "react-native-worklets-core": "^1.6.2"
+  }
+}

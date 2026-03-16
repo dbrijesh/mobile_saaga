@@ -1,0 +1,109 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.claude/
+
+# Backend
+backend/.serverless/
+backend/data/
+backend/.build/
+
+# Mobile
+mobile/.expo/
+mobile/dist/
+mobile/*.log
+mobile/.expo-shared/
+
+# Admin
+admin/dist/
+admin/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+build/
+dist/
+*.tgz
+
+# Temporary files
+.tmp/
+temp/
+
+# ============================================================
+# Excel / CSV data files (large, not for version control)
+# ============================================================
+*.xlsx
+*.xls
+*.csv
+
+# ============================================================
+# Images & binary media
+# ============================================================
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.mp4
+*.apk
+*.ipa
+
+# ============================================================
+# AWS / Serverless
+# ============================================================
+.serverless/
+
+# ============================================================
+# Deploy logs & artifacts
+# ============================================================
+deploy.log
+backend/deploy.log
+
+# ============================================================
+# Sensitive / local config files
+# ============================================================
+config.json
+!config.example.json
+mobile-backup-config.json
+
+# ============================================================
+# React Native — native build dirs
+# ============================================================
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/local.properties
+mobile/ios/Pods/
+mobile/ios/build/
+
+# ============================================================
+# TypeScript incremental build cache
+# ============================================================
+*.tsbuildinfo
+
+# ============================================================
+# Misc generated / junk files
+# ============================================================
+nul
+*.bak
+E:mobilesaagaadminbucket-policy.json

@@ -1,0 +1,11 @@
+{
+  "name": "saaga-scripts",
+  "version": "1.0.0",
+  "description": "Utility scripts for Saaga Groceries",
+  "scripts": {
+    "convert": "node convertExcelToJson.js"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
