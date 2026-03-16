@@ -28,13 +28,6 @@ provider:
     PRODUCT_IMAGES_BUCKET: ${self:service}-product-images-${self:provider.stage}
     REGION: ${self:provider.region}
 
-  vpc:
-    securityGroupIds:
-      - !Ref LambdaSecurityGroup
-    subnetIds:
-      - !Ref PrivateSubnetA
-      - !Ref PrivateSubnetB
-
   iam:
     role:
       statements:
@@ -75,15 +68,6 @@ provider:
             - cognito-idp:AdminGetUser
             - cognito-idp:AdminUpdateUserAttributes
           Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/*"
-        - Effect: Allow
-          Action:
-            - ec2:CreateNetworkInterface
-            - ec2:DescribeNetworkInterfaces
-            - ec2:DeleteNetworkInterface
-            - ec2:AssignPrivateIpAddresses
-            - ec2:UnassignPrivateIpAddresses
-          Resource: "*"
-
 custom:
   userPoolId: !Ref CognitoUserPool
   userPoolClientId: !Ref CognitoUserPoolClient
@@ -902,197 +886,6 @@ functions:
 
 resources:
   Resources:
-    # VPC Infrastructure
-    VPC:
-      Type: AWS::EC2::VPC
-      Properties:
-        CidrBlock: 10.0.0.0/16
-        EnableDnsHostnames: true
-        EnableDnsSupport: true
-        Tags:
-          - Key: Name
-            Value: ${self:service}-vpc-${self:provider.stage}
-
-    InternetGateway:
-      Type: AWS::EC2::InternetGateway
-      Properties:
-        Tags:
-          - Key: Name
-            Value: ${self:service}-igw-${self:provider.stage}
-
-    AttachGateway:
-      Type: AWS::EC2::VPCGatewayAttachment
-      Properties:
-        VpcId: !Ref VPC
-        InternetGatewayId: !Ref InternetGateway
-
-    # Public Subnets (for NAT Gateways)
-    PublicSubnetA:
-      Type: AWS::EC2::Subnet
-      Properties:
-        VpcId: !Ref VPC
-        CidrBlock: 10.0.1.0/24
-        AvailabilityZone: ${self:provider.region}a
-        MapPublicIpOnLaunch: true
-        Tags:
-          - Key: Name
-            Value: ${self:service}-public-subnet-a-${self:provider.stage}
-
-    PublicSubnetB:
-      Type: AWS::EC2::Subnet
-      Properties:
-        VpcId: !Ref VPC
-        CidrBlock: 10.0.2.0/24
-        AvailabilityZone: ${self:provider.region}b
-        MapPublicIpOnLaunch: true
-        Tags:
-          - Key: Name
-            Value: ${self:service}-public-subnet-b-${self:provider.stage}
-
-    # Private Subnets (for Lambda functions)
-    PrivateSubnetA:
-      Type: AWS::EC2::Subnet
-      Properties:
-        VpcId: !Ref VPC
-        CidrBlock: 10.0.11.0/24
-        AvailabilityZone: ${self:provider.region}a
-        Tags:
-          - Key: Name
-            Value: ${self:service}-private-subnet-a-${self:provider.stage}
-
-    PrivateSubnetB:
-      Type: AWS::EC2::Subnet
-      Properties:
-        VpcId: !Ref VPC
-        CidrBlock: 10.0.12.0/24
-        AvailabilityZone: ${self:provider.region}b
-        Tags:
-          - Key: Name
-            Value: ${self:service}-private-subnet-b-${self:provider.stage}
-
-    # Elastic IPs for NAT Gateways
-    NatEIPA:
-      Type: AWS::EC2::EIP
-      DependsOn: AttachGateway
-      Properties:
-        Domain: vpc
-        Tags:
-          - Key: Name
-            Value: ${self:service}-nat-eip-a-${self:provider.stage}
-
-    NatEIPB:
-      Type: AWS::EC2::EIP
-      DependsOn: AttachGateway
-      Properties:
-        Domain: vpc
-        Tags:
-          - Key: Name
-            Value: ${self:service}-nat-eip-b-${self:provider.stage}
-
-    # NAT Gateways
-    NatGatewayA:
-      Type: AWS::EC2::NatGateway
-      Properties:
-        AllocationId: !GetAtt NatEIPA.AllocationId
-        SubnetId: !Ref PublicSubnetA
-        Tags:
-          - Key: Name
-            Value: ${self:service}-nat-gateway-a-${self:provider.stage}
-
-    NatGatewayB:
-      Type: AWS::EC2::NatGateway
-      Properties:
-        AllocationId: !GetAtt NatEIPB.AllocationId
-        SubnetId: !Ref PublicSubnetB
-        Tags:
-          - Key: Name
-            Value: ${self:service}-nat-gateway-b-${self:provider.stage}
-
-    # Public Route Table
-    PublicRouteTable:
-      Type: AWS::EC2::RouteTable
-      Properties:
-        VpcId: !Ref VPC
-        Tags:
-          - Key: Name
-            Value: ${self:service}-public-rt-${self:provider.stage}
-
-    PublicRoute:
-      Type: AWS::EC2::Route
-      DependsOn: AttachGateway
-      Properties:
-        RouteTableId: !Ref PublicRouteTable
-        DestinationCidrBlock: 0.0.0.0/0
-        GatewayId: !Ref InternetGateway
-
-    PublicSubnetARouteTableAssociation:
-      Type: AWS::EC2::SubnetRouteTableAssociation
-      Properties:
-        SubnetId: !Ref PublicSubnetA
-        RouteTableId: !Ref PublicRouteTable
-
-    PublicSubnetBRouteTableAssociation:
-      Type: AWS::EC2::SubnetRouteTableAssociation
-      Properties:
-        SubnetId: !Ref PublicSubnetB
-        RouteTableId: !Ref PublicRouteTable
-
-    # Private Route Tables
-    PrivateRouteTableA:
-      Type: AWS::EC2::RouteTable
-      Properties:
-        VpcId: !Ref VPC
-        Tags:
-          - Key: Name
-            Value: ${self:service}-private-rt-a-${self:provider.stage}
-
-    PrivateRouteA:
-      Type: AWS::EC2::Route
-      Properties:
-        RouteTableId: !Ref PrivateRouteTableA
-        DestinationCidrBlock: 0.0.0.0/0
-        NatGatewayId: !Ref NatGatewayA
-
-    PrivateSubnetARouteTableAssociation:
-      Type: AWS::EC2::SubnetRouteTableAssociation
-      Properties:
-        SubnetId: !Ref PrivateSubnetA
-        RouteTableId: !Ref PrivateRouteTableA
-
-    PrivateRouteTableB:
-      Type: AWS::EC2::RouteTable
-      Properties:
-        VpcId: !Ref VPC
-        Tags:
-          - Key: Name
-            Value: ${self:service}-private-rt-b-${self:provider.stage}
-
-    PrivateRouteB:
-      Type: AWS::EC2::Route
-      Properties:
-        RouteTableId: !Ref PrivateRouteTableB
-        DestinationCidrBlock: 0.0.0.0/0
-        NatGatewayId: !Ref NatGatewayB
-
-    PrivateSubnetBRouteTableAssociation:
-      Type: AWS::EC2::SubnetRouteTableAssociation
-      Properties:
-        SubnetId: !Ref PrivateSubnetB
-        RouteTableId: !Ref PrivateRouteTableB
-
-    # Security Group for Lambda functions
-    LambdaSecurityGroup:
-      Type: AWS::EC2::SecurityGroup
-      Properties:
-        GroupDescription: Security group for Lambda functions
-        VpcId: !Ref VPC
-        SecurityGroupEgress:
-          - IpProtocol: -1
-            CidrIp: 0.0.0.0/0
-        Tags:
-          - Key: Name
-            Value: ${self:service}-lambda-sg-${self:provider.stage}
-
     # Cognito User Pool
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
@@ -1324,35 +1117,6 @@ resources:
             Projection:
               ProjectionType: ALL
 
-    # API Key for mobile app (protects public endpoints from scraping/abuse)
-    MobileAppApiKey:
-      Type: AWS::ApiGateway::ApiKey
-      DependsOn: ApiGatewayDeployment${self:provider.stage}
-      Properties:
-        Name: ${self:service}-mobile-key-${self:provider.stage}
-        Enabled: true
-
-    MobileAppUsagePlan:
-      Type: AWS::ApiGateway::UsagePlan
-      Properties:
-        UsagePlanName: ${self:service}-mobile-plan-${self:provider.stage}
-        Throttle:
-          RateLimit: 50
-          BurstLimit: 100
-        Quota:
-          Limit: 100000
-          Period: DAY
-        ApiStages:
-          - ApiId: !Ref ApiGatewayRestApi
-            Stage: ${self:provider.stage}
-
-    MobileAppUsagePlanKey:
-      Type: AWS::ApiGateway::UsagePlanKey
-      Properties:
-        KeyId: !Ref MobileAppApiKey
-        KeyType: API_KEY
-        UsagePlanId: !Ref MobileAppUsagePlan
-
     # S3 Bucket for Product Images
     ProductImagesBucket:
       Type: AWS::S3::Bucket
@@ -1375,12 +1139,6 @@ resources:
     # Images will be accessed via signed URLs or CloudFront
 
   Outputs:
-    MobileApiKeyId:
-      Value: !Ref MobileAppApiKey
-      Description: "API Key ID — run: aws apigateway get-api-key --api-key <this-id> --include-value --region ap-southeast-1"
-      Export:
-        Name: ${self:service}-MobileApiKeyId-${self:provider.stage}
-
     UserPoolId:
       Value: !Ref CognitoUserPool
       Export:
