@@ -92,6 +92,8 @@ module.exports.createCoupon = async (event) => {
       maxDiscountAmount,
       expiryDate,
       usageLimit,
+      perCustomerLimit,
+      autoApply,
       description
     } = JSON.parse(event.body);
 
@@ -160,6 +162,8 @@ module.exports.createCoupon = async (event) => {
       expiryDate: expiryDate || null,
       usageLimit: usageLimit ? parseInt(usageLimit) : null,
       usageCount: 0,
+      perCustomerLimit: perCustomerLimit ? parseInt(perCustomerLimit) : null,
+      autoApply: !!autoApply,
       status: 'active',
       description: description || '',
       createdAt: new Date().toISOString(),
@@ -227,6 +231,8 @@ module.exports.updateCoupon = async (event) => {
       'usageLimit',
       'minPurchaseAmount',
       'maxDiscountAmount',
+      'perCustomerLimit',
+      'autoApply',
     ];
 
     Object.keys(updates).forEach(key => {
@@ -330,6 +336,117 @@ module.exports.deleteCoupon = async (event) => {
       statusCode: 500,
       headers,
       body: JSON.stringify({ error: 'Could not delete coupon', details: error.message }),
+    };
+  }
+};
+
+/**
+ * Enable a coupon/promotion (Admin only).
+ * Resets usageCount to 0 and stamps enabledAt, so a limited promotion
+ * (e.g. "first 100 orders") starts a fresh redemption window every time
+ * it's turned on.
+ */
+module.exports.enableCoupon = async (event) => {
+  try {
+    const { id } = event.pathParameters;
+
+    const getCommand = new GetCommand({
+      TableName: process.env.COUPONS_TABLE,
+      Key: { couponId: id },
+    });
+    const existing = await docClient.send(getCommand);
+
+    if (!existing.Item) {
+      return {
+        statusCode: 404,
+        headers,
+        body: JSON.stringify({ error: 'Coupon not found' }),
+      };
+    }
+
+    const command = new UpdateCommand({
+      TableName: process.env.COUPONS_TABLE,
+      Key: { couponId: id },
+      UpdateExpression: 'SET #status = :status, usageCount = :zero, enabledAt = :enabledAt, updatedAt = :updatedAt',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':status': 'active',
+        ':zero': 0,
+        ':enabledAt': new Date().toISOString(),
+        ':updatedAt': new Date().toISOString(),
+      },
+      ReturnValues: 'ALL_NEW',
+    });
+
+    const result = await docClient.send(command);
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: 'Coupon enabled and usage counter reset',
+        coupon: result.Attributes,
+      }),
+    };
+  } catch (error) {
+    console.error('Error enabling coupon:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Could not enable coupon', details: error.message }),
+    };
+  }
+};
+
+/**
+ * Disable a coupon/promotion (Admin only). Leaves the usage counter intact.
+ */
+module.exports.disableCoupon = async (event) => {
+  try {
+    const { id } = event.pathParameters;
+
+    const getCommand = new GetCommand({
+      TableName: process.env.COUPONS_TABLE,
+      Key: { couponId: id },
+    });
+    const existing = await docClient.send(getCommand);
+
+    if (!existing.Item) {
+      return {
+        statusCode: 404,
+        headers,
+        body: JSON.stringify({ error: 'Coupon not found' }),
+      };
+    }
+
+    const command = new UpdateCommand({
+      TableName: process.env.COUPONS_TABLE,
+      Key: { couponId: id },
+      UpdateExpression: 'SET #status = :status, updatedAt = :updatedAt',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: {
+        ':status': 'inactive',
+        ':updatedAt': new Date().toISOString(),
+      },
+      ReturnValues: 'ALL_NEW',
+    });
+
+    const result = await docClient.send(command);
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: 'Coupon disabled',
+        coupon: result.Attributes,
+      }),
+    };
+  } catch (error) {
+    console.error('Error disabling coupon:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Could not disable coupon', details: error.message }),
     };
   }
 };

@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "description": "Complete e-commerce platform for Indian groceries in Singapore",
   "private": true,
-  "workspaces": [
-    "backend",
-    "mobile",
-    "admin",
-    "scripts"
-  ],
+  "workspaces": {
+    "packages": [
+      "backend",
+      "mobile",
+      "admin",
+      "scripts"
+    ],
+    "nohoist": [
+      "backend/**"
+    ]
+  },
   "scripts": {
     "setup": "npm install && cd backend && npm install && cd ../mobile && npm install && cd ../admin && npm install && cd ../scripts && npm install",
     "convert-data": "cd scripts && npm run convert",

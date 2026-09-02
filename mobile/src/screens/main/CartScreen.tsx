@@ -33,8 +33,24 @@ export default function CartScreen() {
     );
   };
 
+  const MINIMUM_ORDER = 5;
+
   const calculateTotal = () => {
     return items.reduce((total, item) => total + (item.product.price * item.quantity), 0);
+  };
+
+  const handleCheckout = () => {
+    const total = calculateTotal();
+    if (total < MINIMUM_ORDER) {
+      Alert.alert(
+        'Minimum Order Not Met',
+        `The minimum order amount is $${MINIMUM_ORDER}.00. Your current total is $${total.toFixed(2)}.`,
+        [{ text: 'Keep Shopping' }]
+      );
+      return;
+    }
+    // TODO: Navigate to checkout
+    Alert.alert('Checkout', 'Checkout functionality coming soon!');
   };
 
   const renderCartItem = ({ item }: { item: CartItem }) => (
@@ -97,12 +113,15 @@ export default function CartScreen() {
           <Text style={styles.totalAmount}>${calculateTotal().toFixed(2)}</Text>
         </View>
 
+        {calculateTotal() < MINIMUM_ORDER && (
+          <Text style={styles.minimumOrderNote}>
+            Add ${(MINIMUM_ORDER - calculateTotal()).toFixed(2)} more to reach the $5 minimum order
+          </Text>
+        )}
+
         <Button
           title="Checkout"
-          onPress={() => {
-            // TODO: Navigate to checkout
-            Alert.alert('Checkout', 'Checkout functionality coming soon!');
-          }}
+          onPress={handleCheckout}
         />
       </View>
     </SafeAreaView>
@@ -197,6 +216,13 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#FF6B35',
+  },
+  minimumOrderNote: {
+    fontSize: 13,
+    color: '#E67E22',
+    textAlign: 'center',
+    marginBottom: 10,
+    fontWeight: '500',
   },
   emptyContainer: {
     flex: 1,

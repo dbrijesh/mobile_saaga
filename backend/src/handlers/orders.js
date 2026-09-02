@@ -1,93 +1,49 @@
 const { corsHeaders } = require('../utils/cors');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, QueryCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { v4: uuidv4 } = require('uuid');
-const { applyCoupon } = require('./coupons');
+const { sendOrderConfirmationEmail, sendOrderStatusEmail } = require('../utils/email');
+const { createOrderRecord } = require('../utils/createOrderRecord');
 
 const client = new DynamoDBClient({ region: process.env.REGION });
 const docClient = DynamoDBDocumentClient.from(client);
 
-/**
- * Validate and reserve a shipping date for an order
- */
-const validateAndReserveShippingDate = async (shippingDateId) => {
-  if (!shippingDateId) {
-    return null; // Shipping date is optional
-  }
-
-  try {
-    // Get the shipping date
-    const getCommand = new GetCommand({
-      TableName: process.env.SHIPPING_DATES_TABLE,
-      Key: { shippingDateId },
-    });
-
-    const result = await docClient.send(getCommand);
-
-    if (!result.Item) {
-      throw new Error('Selected shipping date not found');
-    }
-
-    const shippingDate = result.Item;
-
-    // Check if date is active and has capacity
-    if (shippingDate.status !== 'active') {
-      throw new Error('Selected shipping date is not available');
-    }
-
-    if (shippingDate.currentOrders >= shippingDate.capacity) {
-      throw new Error('Selected shipping date is full');
-    }
-
-    // Increment currentOrders
-    const newCurrentOrders = shippingDate.currentOrders + 1;
-    const newStatus = newCurrentOrders >= shippingDate.capacity ? 'full' : 'active';
-
-    const updateCommand = new UpdateCommand({
-      TableName: process.env.SHIPPING_DATES_TABLE,
-      Key: { shippingDateId },
-      UpdateExpression: 'SET currentOrders = :currentOrders, #status = :status, updatedAt = :updatedAt',
-      ExpressionAttributeNames: {
-        '#status': 'status',
-      },
-      ExpressionAttributeValues: {
-        ':currentOrders': newCurrentOrders,
-        ':status': newStatus,
-        ':updatedAt': new Date().toISOString(),
-      },
-    });
-
-    await docClient.send(updateCommand);
-
-    return shippingDate.date;
-  } catch (error) {
-    throw error;
-  }
-};
-
 const headers = corsHeaders;
 
-const getUserId = (event) => {
-  return event.requestContext.authorizer.claims.sub;
+const getUserId = (event) => event.requestContext.authorizer.claims.sub;
+const getUserEmail = (event) => event.requestContext.authorizer.claims.email;
+
+// Orders created before customerEmail was stored on the order need a fallback lookup
+const resolveCustomerEmail = async (order) => {
+  if (order.customerEmail) return order.customerEmail;
+  try {
+    const result = await docClient.send(
+      new GetCommand({ TableName: process.env.USERS_TABLE, Key: { userId: order.userId } })
+    );
+    return result.Item?.email || null;
+  } catch (err) {
+    console.error('Could not resolve customer email for status update:', err.message);
+    return null;
+  }
 };
 
 /**
- * Create a new order
+ * Create a new order (legacy endpoint — new checkout uses POST /payment/confirm instead)
  */
 module.exports.createOrder = async (event) => {
   try {
     const userId = getUserId(event);
+    const userEmail = getUserEmail(event);
     const {
       items,
       shippingAddress,
-      paymentMethod,
       paymentIntentId,
       totalAmount,
       notes,
       shippingDateId,
       couponId,
       couponCode,
-      discountAmount
+      discountAmount,
     } = JSON.parse(event.body);
 
     if (!items || items.length === 0) {
@@ -106,71 +62,34 @@ module.exports.createOrder = async (event) => {
       };
     }
 
-    // Validate and reserve shipping date if provided
-    let selectedShippingDate = null;
+    const orderId = paymentIntentId || uuidv4();
+
+    let result;
     try {
-      selectedShippingDate = await validateAndReserveShippingDate(shippingDateId);
+      result = await createOrderRecord(orderId, userId, {
+        items, shippingAddress, totalAmount, notes,
+        shippingDateId, couponId, couponCode, discountAmount, paymentIntentId,
+        customerEmail: userEmail,
+      });
     } catch (error) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: error.message }),
-      };
+      if (error.message.includes('shipping date')) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: error.message }) };
+      }
+      throw error;
     }
 
-    // Apply coupon if provided
-    if (couponId) {
-      const applied = await applyCoupon(couponId);
-      if (!applied) {
-        console.error('Failed to apply coupon, but continuing with order');
+    if (!result.alreadyExisted) {
+      try {
+        await sendOrderConfirmationEmail(result.order, userEmail);
+      } catch (err) {
+        console.error('Order email error:', err.message);
       }
     }
-
-    const orderId = uuidv4();
-    const order = {
-      orderId,
-      userId,
-      items,
-      shippingAddress,
-      paymentMethod: paymentMethod || 'stripe',
-      paymentIntentId,
-      totalAmount: parseFloat(totalAmount),
-      status: 'pending',
-      paymentStatus: 'paid',
-      notes: notes || '',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      estimatedDelivery: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days
-    };
-
-    // Add shipping date fields if provided
-    if (shippingDateId) {
-      order.shippingDateId = shippingDateId;
-      order.selectedShippingDate = selectedShippingDate;
-    }
-
-    // Add coupon fields if provided
-    if (couponId && couponCode) {
-      order.couponId = couponId;
-      order.couponCode = couponCode;
-      order.discountAmount = discountAmount ? parseFloat(discountAmount) : 0;
-      order.subtotal = parseFloat(totalAmount) + parseFloat(discountAmount || 0);
-    }
-
-    const command = new PutCommand({
-      TableName: process.env.ORDERS_TABLE,
-      Item: order,
-    });
-
-    await docClient.send(command);
 
     return {
       statusCode: 201,
       headers,
-      body: JSON.stringify({
-        message: 'Order created successfully',
-        order,
-      }),
+      body: JSON.stringify({ message: 'Order created successfully', order: result.order }),
     };
   } catch (error) {
     console.error('Error creating order:', error);
@@ -364,6 +283,13 @@ module.exports.cancelOrder = async (event) => {
       }
     }
 
+    try {
+      const email = await resolveCustomerEmail(result.Attributes);
+      await sendOrderStatusEmail(result.Attributes, email, 'cancelled');
+    } catch (err) {
+      console.error('Order status email error:', err.message);
+    }
+
     return {
       statusCode: 200,
       headers,
@@ -421,6 +347,13 @@ module.exports.updateOrderStatus = async (event) => {
     });
 
     const result = await docClient.send(command);
+
+    try {
+      const email = await resolveCustomerEmail(result.Attributes);
+      await sendOrderStatusEmail(result.Attributes, email, status, trackingNumber);
+    } catch (err) {
+      console.error('Order status email error:', err.message);
+    }
 
     return {
       statusCode: 200,

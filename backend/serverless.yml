@@ -17,16 +17,22 @@ provider:
     USERS_TABLE: ${self:service}-users-${self:provider.stage}
     ORDERS_TABLE: ${self:service}-orders-${self:provider.stage}
     CART_TABLE: ${self:service}-cart-${self:provider.stage}
+    WISHLIST_TABLE: ${self:service}-wishlist-${self:provider.stage}
     ADDRESSES_TABLE: ${self:service}-addresses-${self:provider.stage}
     CATEGORIES_TABLE: ${self:service}-categories-${self:provider.stage}
     SUBCATEGORIES_TABLE: ${self:service}-subcategories-${self:provider.stage}
     SHIPPING_DATES_TABLE: ${self:service}-shipping-dates-${self:provider.stage}
     COUPONS_TABLE: ${self:service}-coupons-${self:provider.stage}
+    COUNTERS_TABLE: ${self:service}-counters-${self:provider.stage}
     USER_POOL_ID: ${self:custom.userPoolId}
     USER_POOL_CLIENT_ID: ${self:custom.userPoolClientId}
-    STRIPE_SECRET_KEY: ${env:STRIPE_SECRET_KEY}
+    STRIPE_SECRET_ARN: "arn:aws:secretsmanager:${self:provider.region}:196766918470:secret:saaga-online-api/stripe-secret-key-Gdw9jw"
     PRODUCT_IMAGES_BUCKET: ${self:service}-product-images-${self:provider.stage}
     REGION: ${self:provider.region}
+    SES_FROM_EMAIL: customercare@saagaonline.com
+    SES_CC_EMAIL: customercare@saagaonline.com
+    SMTP_HOST: smtp.gmail.com
+    SMTP_SECRET_ARN: "arn:aws:secretsmanager:${self:provider.region}:196766918470:secret:saaga-online-api/gmail-smtp-credentials"
 
   iam:
     role:
@@ -46,11 +52,13 @@ provider:
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.USERS_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.ORDERS_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.CART_TABLE}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.WISHLIST_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.ADDRESSES_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.CATEGORIES_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.SUBCATEGORIES_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.SHIPPING_DATES_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.COUPONS_TABLE}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.COUNTERS_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.PRODUCTS_TABLE}/index/*"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.ORDERS_TABLE}/index/*"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.ADDRESSES_TABLE}/index/*"
@@ -68,6 +76,12 @@ provider:
             - cognito-idp:AdminGetUser
             - cognito-idp:AdminUpdateUserAttributes
           Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/*"
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource:
+            - "arn:aws:secretsmanager:${self:provider.region}:196766918470:secret:saaga-online-api/stripe-secret-key-Gdw9jw"
+            - "arn:aws:secretsmanager:${self:provider.region}:196766918470:secret:saaga-online-api/gmail-smtp-credentials-*"
 custom:
   userPoolId: !Ref CognitoUserPool
   userPoolClientId: !Ref CognitoUserPoolClient
@@ -128,7 +142,6 @@ functions:
           path: subcategories
           method: get
           cors: true
-          private: true
 
   # Shipping Dates APIs
   getAvailableShippingDates:
@@ -191,6 +204,73 @@ functions:
       - http:
           path: cart
           method: delete
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  moveCartItemToWishlist:
+    handler: src/handlers/cart.moveToWishlist
+    events:
+      - http:
+          path: cart/{itemId}/move-to-wishlist
+          method: post
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  # Wishlist APIs
+  getWishlist:
+    handler: src/handlers/wishlist.getWishlist
+    events:
+      - http:
+          path: wishlist
+          method: get
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  addToWishlist:
+    handler: src/handlers/wishlist.addToWishlist
+    events:
+      - http:
+          path: wishlist
+          method: post
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  removeFromWishlist:
+    handler: src/handlers/wishlist.removeFromWishlist
+    events:
+      - http:
+          path: wishlist/{itemId}
+          method: delete
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  clearWishlist:
+    handler: src/handlers/wishlist.clearWishlist
+    events:
+      - http:
+          path: wishlist
+          method: delete
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  moveWishlistItemToCart:
+    handler: src/handlers/wishlist.moveToCart
+    events:
+      - http:
+          path: wishlist/{itemId}/move-to-cart
+          method: post
           cors: true
           authorizer:
             type: COGNITO_USER_POOLS
@@ -370,6 +450,17 @@ functions:
       - http:
           path: admin/orders
           method: get
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  adminCancelOrder:
+    handler: src/handlers/admin/orders.cancelOrder
+    events:
+      - http:
+          path: admin/orders/{orderId}/cancel
+          method: post
           cors: true
           authorizer:
             type: COGNITO_USER_POOLS
@@ -783,6 +874,16 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref ApiGatewayAuthorizer
 
+  # Public endpoint (API key only) - active auto-apply promotion + live usage counter
+  getActivePromotion:
+    handler: src/handlers/coupons.getActivePromotion
+    events:
+      - http:
+          path: promotions/active
+          method: get
+          cors: true
+          private: true
+
   # Admin coupon endpoints
   adminGetAllCoupons:
     handler: src/handlers/admin/coupons.getAllCoupons
@@ -884,8 +985,70 @@ functions:
             type: COGNITO_USER_POOLS
             authorizerId: !Ref ApiGatewayAuthorizer
 
+  adminEnableCoupon:
+    handler: src/handlers/admin/coupons.enableCoupon
+    events:
+      - http:
+          path: admin/coupons/{id}/enable
+          method: put
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  adminDisableCoupon:
+    handler: src/handlers/admin/coupons.disableCoupon
+    events:
+      - http:
+          path: admin/coupons/{id}/disable
+          method: put
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
 resources:
   Resources:
+    # CORS headers on API Gateway error responses (4XX/5XX)
+    # Without these, Cognito 401s reach the browser as CORS errors
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        ResponseType: DEFAULT_4XX
+        RestApiId: !Ref ApiGatewayRestApi
+
+    GatewayResponseDefault5XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        ResponseType: DEFAULT_5XX
+        RestApiId: !Ref ApiGatewayRestApi
+
     # Cognito User Pool
     CognitoUserPool:
       Type: AWS::Cognito::UserPool
@@ -1013,6 +1176,22 @@ resources:
           - AttributeName: productId
             KeyType: RANGE
 
+    WishlistTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.WISHLIST_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: productId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: productId
+            KeyType: RANGE
+
     AddressesTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -1116,6 +1295,18 @@ resources:
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
+
+    CountersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.COUNTERS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: counterId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: counterId
+            KeyType: HASH
 
     # S3 Bucket for Product Images
     ProductImagesBucket:

@@ -242,6 +242,71 @@ module.exports.removeFromCart = async (event) => {
 };
 
 /**
+ * Move an item from the cart to the wishlist.
+ * Removes the cart entry and adds a wishlist entry (idempotent if already there).
+ */
+module.exports.moveToWishlist = async (event) => {
+  try {
+    const userId = getUserId(event);
+    const { itemId } = event.pathParameters;
+
+    const cartCommand = new GetCommand({
+      TableName: process.env.CART_TABLE,
+      Key: { userId, productId: itemId },
+    });
+    const cartResult = await docClient.send(cartCommand);
+
+    if (!cartResult.Item) {
+      return {
+        statusCode: 404,
+        headers,
+        body: JSON.stringify({ error: 'Item not found in cart' }),
+      };
+    }
+
+    const existingWishlistCommand = new GetCommand({
+      TableName: process.env.WISHLIST_TABLE,
+      Key: { userId, productId: itemId },
+    });
+    const existingWishlistResult = await docClient.send(existingWishlistCommand);
+
+    const wishlistItem = existingWishlistResult.Item || {
+      userId,
+      productId: itemId,
+      addedAt: new Date().toISOString(),
+    };
+
+    if (!existingWishlistResult.Item) {
+      await docClient.send(new PutCommand({
+        TableName: process.env.WISHLIST_TABLE,
+        Item: wishlistItem,
+      }));
+    }
+
+    await docClient.send(new DeleteCommand({
+      TableName: process.env.CART_TABLE,
+      Key: { userId, productId: itemId },
+    }));
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: 'Item moved to wishlist',
+        item: wishlistItem,
+      }),
+    };
+  } catch (error) {
+    console.error('Error moving item to wishlist:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Could not move item to wishlist', details: error.message }),
+    };
+  }
+};
+
+/**
  * Clear entire cart
  */
 module.exports.clearCart = async (event) => {

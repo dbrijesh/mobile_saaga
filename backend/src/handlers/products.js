@@ -39,7 +39,36 @@ const addDiscountedPrice = (product) => {
  */
 module.exports.getProducts = async (event) => {
   try {
-    const { limit = '20', lastKey, category, subCategory, featured, sort } = event.queryStringParameters || {};
+    const { limit = '20', lastKey, category, subCategory, featured, sort, all } = event.queryStringParameters || {};
+
+    // all=true: paginate DynamoDB internally and return everything in one response
+    if (all === 'true' && !category) {
+      let allItems = [];
+      let startKey;
+      do {
+        const scanParams = {
+          TableName: process.env.PRODUCTS_TABLE,
+          ...(startKey && { ExclusiveStartKey: startKey }),
+        };
+        const result = await docClient.send(new ScanCommand(scanParams));
+        allItems.push(...result.Items);
+        startKey = result.LastEvaluatedKey;
+      } while (startKey);
+
+      if (featured === 'true') {
+        allItems = allItems.filter(item => item.featured === true);
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          products: allItems.map(addDiscountedPrice),
+          lastKey: null,
+          count: allItems.length,
+        }),
+      };
+    }
 
     let params = {
       TableName: process.env.PRODUCTS_TABLE,
@@ -60,6 +89,10 @@ module.exports.getProducts = async (event) => {
           ':category': category,
         },
       };
+
+      if (lastKey) {
+        params.ExclusiveStartKey = JSON.parse(decodeURIComponent(lastKey));
+      }
 
       // Add FilterExpression for subcategory if provided
       if (subCategory) {

@@ -1,11 +1,26 @@
 const { corsHeaders } = require('../../utils/cors');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, ScanCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, ScanCommand, UpdateCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
+const { sendOrderStatusEmail } = require('../../utils/email');
 
 const client = new DynamoDBClient({ region: process.env.REGION });
 const docClient = DynamoDBDocumentClient.from(client);
 
 const headers = corsHeaders;
+
+// Orders created before customerEmail was stored on the order need a fallback lookup
+const resolveCustomerEmail = async (order) => {
+  if (order.customerEmail) return order.customerEmail;
+  try {
+    const result = await docClient.send(
+      new GetCommand({ TableName: process.env.USERS_TABLE, Key: { userId: order.userId } })
+    );
+    return result.Item?.email || null;
+  } catch (err) {
+    console.error('Could not resolve customer email for status update:', err.message);
+    return null;
+  }
+};
 
 /**
  * Get all orders (Admin only)
@@ -66,6 +81,81 @@ module.exports.getAllOrders = async (event) => {
       statusCode: 500,
       headers,
       body: JSON.stringify({ error: 'Could not retrieve orders', details: error.message }),
+    };
+  }
+};
+
+/**
+ * Admin cancel order — no user ownership check, broader status allowance
+ */
+module.exports.cancelOrder = async (event) => {
+  try {
+    const { orderId } = event.pathParameters;
+
+    const getResult = await docClient.send(new GetCommand({
+      TableName: process.env.ORDERS_TABLE,
+      Key: { orderId },
+    }));
+
+    if (!getResult.Item) {
+      return { statusCode: 404, headers, body: JSON.stringify({ error: 'Order not found' }) };
+    }
+
+    const order = getResult.Item;
+
+    if (['delivered', 'cancelled'].includes(order.status)) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: `Cannot cancel an order that is already ${order.status}` }),
+      };
+    }
+
+    const now = new Date().toISOString();
+
+    await docClient.send(new UpdateCommand({
+      TableName: process.env.ORDERS_TABLE,
+      Key: { orderId },
+      UpdateExpression: 'SET #status = :status, updatedAt = :now, cancelledAt = :now',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: { ':status': 'cancelled', ':now': now },
+    }));
+
+    // Release shipping date capacity if applicable
+    if (order.shippingDateId) {
+      try {
+        await docClient.send(new UpdateCommand({
+          TableName: process.env.SHIPPING_DATES_TABLE,
+          Key: { shippingDateId: order.shippingDateId },
+          UpdateExpression: 'SET currentOrders = currentOrders - :dec, #status = :active, updatedAt = :now',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: { ':dec': 1, ':active': 'active', ':now': now },
+        }));
+      } catch (err) {
+        console.error('Error releasing shipping date capacity:', err);
+      }
+    }
+
+    const cancelledOrder = { ...order, status: 'cancelled', cancelledAt: now };
+
+    try {
+      const email = await resolveCustomerEmail(cancelledOrder);
+      await sendOrderStatusEmail(cancelledOrder, email, 'cancelled');
+    } catch (err) {
+      console.error('Order status email error:', err.message);
+    }
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ message: 'Order cancelled successfully', order: cancelledOrder }),
+    };
+  } catch (error) {
+    console.error('Error cancelling order:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Could not cancel order', details: error.message }),
     };
   }
 };

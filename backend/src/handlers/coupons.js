@@ -8,6 +8,84 @@ const docClient = DynamoDBDocumentClient.from(client);
 const headers = corsHeaders;
 
 /**
+ * Count how many of this user's past orders already redeemed this coupon.
+ * Used to enforce per-customer redemption limits (e.g. 1 order per customer).
+ */
+const countCustomerCouponUsage = async (userId, couponId) => {
+  const command = new QueryCommand({
+    TableName: process.env.ORDERS_TABLE,
+    IndexName: 'UserOrdersIndex',
+    KeyConditionExpression: 'userId = :uid',
+    FilterExpression: 'couponId = :cid',
+    ExpressionAttributeValues: { ':uid': userId, ':cid': couponId },
+    ProjectionExpression: 'orderId',
+  });
+  const result = await docClient.send(command);
+  return result.Items ? result.Items.length : 0;
+};
+
+module.exports.countCustomerCouponUsage = countCustomerCouponUsage;
+
+/**
+ * Public endpoint for the mobile app: returns the currently active
+ * auto-apply promotion (if any) along with live redemption counts, so
+ * the app can show a "X/100 claimed" style counter without needing a code.
+ */
+module.exports.getActivePromotion = async (event) => {
+  try {
+    const command = new QueryCommand({
+      TableName: process.env.COUPONS_TABLE,
+      IndexName: 'StatusIndex',
+      KeyConditionExpression: '#status = :status',
+      FilterExpression: 'autoApply = :autoApply',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: { ':status': 'active', ':autoApply': true },
+    });
+
+    const result = await docClient.send(command);
+    const promotions = result.Items || [];
+    const promo = promotions.sort((a, b) => (b.enabledAt || '').localeCompare(a.enabledAt || ''))[0];
+
+    if (!promo) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({ active: false }),
+      };
+    }
+
+    const soldOut = !!promo.usageLimit && promo.usageCount >= promo.usageLimit;
+    const remaining = promo.usageLimit ? Math.max(promo.usageLimit - promo.usageCount, 0) : null;
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        active: !soldOut,
+        promotion: {
+          code: promo.code,
+          discountType: promo.discountType,
+          discountValue: promo.discountValue,
+          minPurchaseAmount: promo.minPurchaseAmount || 0,
+          perCustomerLimit: promo.perCustomerLimit || null,
+          usageLimit: promo.usageLimit || null,
+          usageCount: promo.usageCount || 0,
+          remaining,
+          description: promo.description || '',
+        },
+      }),
+    };
+  } catch (error) {
+    console.error('Error getting active promotion:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: 'Could not retrieve active promotion', details: error.message }),
+    };
+  }
+};
+
+/**
  * Validate a coupon code and return discount details
  * Public endpoint for customers during checkout
  */
@@ -95,6 +173,24 @@ module.exports.validateCoupon = async (event) => {
       };
     }
 
+    // Check per-customer redemption limit
+    if (coupon.perCustomerLimit) {
+      const userId = event.requestContext?.authorizer?.claims?.sub;
+      if (userId) {
+        const usedCount = await countCustomerCouponUsage(userId, coupon.couponId);
+        if (usedCount >= coupon.perCustomerLimit) {
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({
+              valid: false,
+              error: 'You have already used this coupon'
+            }),
+          };
+        }
+      }
+    }
+
     // Check minimum purchase amount
     if (coupon.minPurchaseAmount && orderTotal < coupon.minPurchaseAmount) {
       return {
@@ -168,9 +264,12 @@ const applyCoupon = async (couponId) => {
       TableName: process.env.COUPONS_TABLE,
       Key: { couponId },
       UpdateExpression: 'SET usageCount = usageCount + :inc, updatedAt = :updatedAt',
+      // Guards against races so the global cap (e.g. "first 100 orders") can't be oversold
+      ConditionExpression: 'usageLimit = :null OR usageCount < usageLimit',
       ExpressionAttributeValues: {
         ':inc': 1,
         ':updatedAt': new Date().toISOString(),
+        ':null': null,
       },
       ReturnValues: 'ALL_NEW',
     });
@@ -178,6 +277,10 @@ const applyCoupon = async (couponId) => {
     await docClient.send(command);
     return true;
   } catch (error) {
+    if (error.name === 'ConditionalCheckFailedException') {
+      console.warn(`Coupon ${couponId} usage limit reached`);
+      return false;
+    }
     console.error('Error applying coupon:', error);
     return false;
   }

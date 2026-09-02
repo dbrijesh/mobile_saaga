@@ -151,9 +151,21 @@ class ApiService {
     return response.data as { clientSecret: string; paymentIntentId: string };
   }
 
-  async confirmPayment(paymentIntentId: string) {
-    const response = await this.api.post('/payment/confirm', { paymentIntentId });
-    return response.data;
+  async confirmPayment(
+    paymentIntentId: string,
+    orderData: {
+      items: Array<{ productId: string; name: string; price: number; quantity: number; unit?: string; weight?: string }>;
+      shippingAddress: object;
+      totalAmount: number;
+      notes?: string;
+      shippingDateId?: string;
+      couponId?: string;
+      couponCode?: string;
+      discountAmount?: number;
+    }
+  ) {
+    const response = await this.api.post('/payment/confirm', { paymentIntentId, ...orderData });
+    return response.data as { status: string; order: Order; alreadyExisted: boolean };
   }
 
   // User Profile

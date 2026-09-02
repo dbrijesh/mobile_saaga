@@ -209,14 +209,6 @@ const Login: React.FC = () => {
           </button>
         </form>
 
-        <div className="login-credentials">
-          <p className="login-hint">
-            <strong>Admin Credentials:</strong>
-          </p>
-          <p>Email: <code>admin@saaga.com</code></p>
-          <p>Password: <code>AdminPass123!</code></p>
-          <p className="note">You'll be asked to change the password on first login</p>
-        </div>
       </div>
     </div>
   );

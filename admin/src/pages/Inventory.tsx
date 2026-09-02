@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Inventory.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://0vdwl01ssb.execute-api.ap-southeast-1.amazonaws.com/dev';
+const API_URL = import.meta.env.VITE_API_URL || 'https://cfrgxy85j4.execute-api.ap-southeast-1.amazonaws.com/dev';
+const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 interface Product {
   id: string;
@@ -18,6 +19,8 @@ interface Product {
   unit?: string;
   weight?: string;
   discountPercent?: number;
+  purchasePriceINR?: number;
+  purchasePriceSGD?: number;
 }
 
 interface Category {
@@ -66,7 +69,9 @@ const Inventory: React.FC = () => {
 
   const fetchProducts = async () => {
     try {
-      const response = await axios.get(`${API_URL}/products?limit=1000`);
+      const response = await axios.get(`${API_URL}/products?all=true`, {
+        headers: { 'x-api-key': API_KEY },
+      });
       setProducts(response.data.products || []);
     } catch (error) {
       console.error('Error fetching products:', error);
@@ -78,7 +83,9 @@ const Inventory: React.FC = () => {
 
   const fetchCategories = async () => {
     try {
-      const response = await axios.get(`${API_URL}/categories`);
+      const response = await axios.get(`${API_URL}/categories`, {
+        headers: { 'x-api-key': API_KEY }
+      });
       const categoryNames = response.data.categories?.map((cat: Category) => cat.name) || [];
       setCategories(['all', ...categoryNames]);
     } catch (error) {
@@ -91,7 +98,9 @@ const Inventory: React.FC = () => {
 
   const fetchSubcategories = async () => {
     try {
-      const response = await axios.get(`${API_URL}/subcategories`);
+      const response = await axios.get(`${API_URL}/subcategories`, {
+        headers: { 'x-api-key': API_KEY }
+      });
       setSubcategories(response.data.subcategories || []);
     } catch (error) {
       console.error('Error fetching subcategories:', error);
@@ -114,7 +123,9 @@ const Inventory: React.FC = () => {
       description: '',
       imageUrl: '',
       unit: '',
-      weight: ''
+      weight: '',
+      purchasePriceINR: 0,
+      purchasePriceSGD: 0
     });
     setImageFile(null);
     setImagePreview('');
@@ -263,7 +274,9 @@ const Inventory: React.FC = () => {
         sku: editingProduct.sku,
         unit: editingProduct.unit || '',
         weight: editingProduct.weight || '',
-        discountPercent: parseFloat((editingProduct.discountPercent || 0).toString())
+        discountPercent: parseFloat((editingProduct.discountPercent || 0).toString()),
+        purchasePriceINR: parseFloat((editingProduct.purchasePriceINR || 0).toString()),
+        purchasePriceSGD: parseFloat((editingProduct.purchasePriceSGD || 0).toString())
       };
 
       if (isAddMode) {
@@ -329,7 +342,7 @@ const Inventory: React.FC = () => {
 
   const handleExport = () => {
     // Create CSV content
-    const headers = ['SKU', 'Name', 'Category', 'Subcategory', 'Price', 'Discount %', 'Discounted Price', 'Stock', 'In Stock', 'Unit', 'Weight', 'Description', 'Image URL'];
+    const headers = ['SKU', 'Name', 'Category', 'Subcategory', 'Price', 'Discount %', 'Discounted Price', 'Purchase Price (INR)', 'Purchase Price (SGD)', 'Stock', 'In Stock', 'Unit', 'Weight', 'Description', 'Image URL'];
     const rows = products.map(p => [
       p.sku,
       p.name,
@@ -338,6 +351,8 @@ const Inventory: React.FC = () => {
       p.price,
       p.discountPercent || 0,
       p.discountPercent ? (p.price * (1 - p.discountPercent / 100)).toFixed(2) : p.price.toFixed(2),
+      p.purchasePriceINR ?? '',
+      p.purchasePriceSGD ?? '',
       p.stock,
       p.inStock ? 'Yes' : 'No',
       p.unit || '',
@@ -449,6 +464,12 @@ const Inventory: React.FC = () => {
                 break;
               case 'discount %':
                 productData.discountPercent = parseFloat(value) || 0;
+                break;
+              case 'purchase price (inr)':
+                productData.purchasePriceINR = parseFloat(value) || 0;
+                break;
+              case 'purchase price (sgd)':
+                productData.purchasePriceSGD = parseFloat(value) || 0;
                 break;
               case 'stock':
                 productData.stock = parseInt(value) || 0;
@@ -613,6 +634,8 @@ const Inventory: React.FC = () => {
               <th>Price (SGD)</th>
               <th>Discount</th>
               <th>Final Price</th>
+              <th>Purchase Price (INR)</th>
+              <th>Purchase Price (SGD)</th>
               <th>Stock</th>
               <th>Status</th>
               <th>Actions</th>
@@ -664,6 +687,12 @@ const Inventory: React.FC = () => {
                   ) : (
                     <span>SGD {product.price.toFixed(2)}</span>
                   )}
+                </td>
+                <td className="price">
+                  {product.purchasePriceINR != null ? `₹${product.purchasePriceINR.toFixed(2)}` : '-'}
+                </td>
+                <td className="price">
+                  {product.purchasePriceSGD != null ? `SGD ${product.purchasePriceSGD.toFixed(2)}` : '-'}
                 </td>
                 <td className={`stock ${product.stock < 10 ? 'low-stock' : ''}`}>
                   {product.stock}
@@ -812,6 +841,30 @@ const Inventory: React.FC = () => {
                 </div>
               </div>
 
+              <div className="form-row-group">
+                <div className="form-row">
+                  <label>Purchase Price (INR)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingProduct.purchasePriceINR ?? 0}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, purchasePriceINR: parseFloat(e.target.value) || 0 })}
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div className="form-row">
+                  <label>Purchase Price (SGD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingProduct.purchasePriceSGD ?? 0}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, purchasePriceSGD: parseFloat(e.target.value) || 0 })}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
               <div className="form-row">
                 <label>Discount (%)</label>
                 <input
@@ -824,6 +877,28 @@ const Inventory: React.FC = () => {
                   placeholder="0"
                 />
                 <p className="help-text">Enter discount percentage (0-100). Leave as 0 for no discount.</p>
+              </div>
+
+              <div className="form-row-group">
+                <div className="form-row">
+                  <label>Unit</label>
+                  <input
+                    type="text"
+                    value={editingProduct.unit || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, unit: e.target.value })}
+                    placeholder="e.g. kg, pack, piece"
+                  />
+                </div>
+
+                <div className="form-row">
+                  <label>Weight</label>
+                  <input
+                    type="text"
+                    value={editingProduct.weight || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, weight: e.target.value })}
+                    placeholder="e.g. 500g, 1kg, 5l"
+                  />
+                </div>
               </div>
 
               <div className="form-row">
@@ -859,18 +934,6 @@ const Inventory: React.FC = () => {
                 />
               </div>
 
-              <div className="debug-info" style={{
-                background: '#f0f0f0',
-                padding: '12px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                fontFamily: 'monospace',
-                marginTop: '16px'
-              }}>
-                <strong>Debug Info:</strong><br/>
-                Token: {localStorage.getItem('authToken') ? '✓ Found' : '✗ Missing'}<br/>
-                User: {localStorage.getItem('userEmail') || 'Not found'}
-              </div>
             </div>
 
             <div className="modal-footer">

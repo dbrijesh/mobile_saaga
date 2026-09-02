@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Coupons.css';
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = import.meta.env.VITE_API_URL || 'https://cfrgxy85j4.execute-api.ap-southeast-1.amazonaws.com/dev';
 
 interface Coupon {
   couponId: string;
@@ -14,6 +14,8 @@ interface Coupon {
   expiryDate?: string;
   usageLimit?: number;
   usageCount: number;
+  perCustomerLimit?: number | null;
+  autoApply?: boolean;
   status: 'active' | 'inactive' | 'deleted';
   description?: string;
   createdAt: string;
@@ -60,6 +62,8 @@ const Coupons: React.FC = () => {
       expiryDate: '',
       usageLimit: undefined,
       usageCount: 0,
+      perCustomerLimit: undefined,
+      autoApply: false,
       status: 'active',
       description: '',
       createdAt: '',
@@ -120,6 +124,8 @@ const Coupons: React.FC = () => {
         maxDiscountAmount: editingCoupon.maxDiscountAmount || null,
         expiryDate: editingCoupon.expiryDate || null,
         usageLimit: editingCoupon.usageLimit || null,
+        perCustomerLimit: editingCoupon.perCustomerLimit || null,
+        autoApply: !!editingCoupon.autoApply,
         description: editingCoupon.description?.trim() || '',
       };
 
@@ -145,6 +151,8 @@ const Coupons: React.FC = () => {
             usageLimit: couponData.usageLimit,
             minPurchaseAmount: couponData.minPurchaseAmount,
             maxDiscountAmount: couponData.maxDiscountAmount,
+            perCustomerLimit: couponData.perCustomerLimit,
+            autoApply: couponData.autoApply,
           },
           {
             headers: {
@@ -213,6 +221,47 @@ const Coupons: React.FC = () => {
     }
   };
 
+  const handleEnableCoupon = async (coupon: Coupon) => {
+    const isPromo = coupon.autoApply && coupon.usageLimit;
+    const confirmMessage = isPromo
+      ? `Enable "${coupon.code}"? This resets its usage counter to 0/${coupon.usageLimit}, so the next ${coupon.usageLimit} qualifying orders from now can redeem it.`
+      : `Enable "${coupon.code}"? This resets its usage counter to 0.`;
+
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      const token = localStorage.getItem('authToken');
+      await axios.put(
+        `${API_URL}/admin/coupons/${coupon.couponId}/enable`,
+        {},
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      alert('Coupon enabled and usage counter reset.');
+      fetchCoupons();
+    } catch (error: any) {
+      console.error('Error enabling coupon:', error);
+      alert('Failed to enable coupon. ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const handleDisableCoupon = async (coupon: Coupon) => {
+    if (!confirm(`Disable "${coupon.code}"? Customers will no longer be able to redeem it.`)) return;
+
+    try {
+      const token = localStorage.getItem('authToken');
+      await axios.put(
+        `${API_URL}/admin/coupons/${coupon.couponId}/disable`,
+        {},
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      alert('Coupon disabled.');
+      fetchCoupons();
+    } catch (error: any) {
+      console.error('Error disabling coupon:', error);
+      alert('Failed to disable coupon. ' + (error.response?.data?.error || error.message));
+    }
+  };
+
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case 'active': return 'status-active';
@@ -244,6 +293,7 @@ const Coupons: React.FC = () => {
               <th>Discount</th>
               <th>Min Purchase</th>
               <th>Usage</th>
+              <th>Per Customer</th>
               <th>Expiry Date</th>
               <th>Status</th>
               <th>Actions</th>
@@ -252,7 +302,10 @@ const Coupons: React.FC = () => {
           <tbody>
             {coupons.filter(c => c.status !== 'deleted').map((coupon) => (
               <tr key={coupon.couponId}>
-                <td className="coupon-code">{coupon.code}</td>
+                <td className="coupon-code">
+                  {coupon.code}
+                  {coupon.autoApply && <span className="auto-apply-badge">AUTO</span>}
+                </td>
                 <td>{coupon.discountType === 'percentage' ? 'Percentage' : 'Fixed Amount'}</td>
                 <td className="discount-value">
                   {coupon.discountType === 'percentage'
@@ -269,6 +322,7 @@ const Coupons: React.FC = () => {
                     ? `${coupon.usageCount}/${coupon.usageLimit}`
                     : `${coupon.usageCount}/∞`}
                 </td>
+                <td>{coupon.perCustomerLimit || '-'}</td>
                 <td>{coupon.expiryDate || 'No expiry'}</td>
                 <td>
                   <span className={`status-badge ${getStatusBadgeClass(coupon.status)}`}>
@@ -276,10 +330,19 @@ const Coupons: React.FC = () => {
                   </span>
                 </td>
                 <td>
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button className="edit-btn" onClick={() => handleEditClick(coupon)}>
                       Edit
                     </button>
+                    {coupon.status === 'active' ? (
+                      <button className="delete-btn" onClick={() => handleDisableCoupon(coupon)}>
+                        Disable
+                      </button>
+                    ) : (
+                      <button className="edit-btn" onClick={() => handleEnableCoupon(coupon)}>
+                        Enable
+                      </button>
+                    )}
                     <button className="delete-btn" onClick={() => handleDeleteCoupon(coupon)}>
                       Delete
                     </button>
@@ -402,6 +465,33 @@ const Coupons: React.FC = () => {
                     onChange={(e) => setEditingCoupon({ ...editingCoupon, usageLimit: e.target.value ? parseInt(e.target.value) : undefined })}
                     placeholder="Unlimited"
                   />
+                  <p className="help-text">Total redemptions allowed across all customers (e.g. 100)</p>
+                </div>
+              </div>
+
+              <div className="form-row-group">
+                <div className="form-row">
+                  <label>Limit Per Customer</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editingCoupon.perCustomerLimit || ''}
+                    onChange={(e) => setEditingCoupon({ ...editingCoupon, perCustomerLimit: e.target.value ? parseInt(e.target.value) : undefined })}
+                    placeholder="Unlimited"
+                  />
+                  <p className="help-text">Max redemptions per customer (e.g. 1 = one order per customer)</p>
+                </div>
+
+                <div className="form-row">
+                  <label>Auto-Apply</label>
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={!!editingCoupon.autoApply}
+                      onChange={(e) => setEditingCoupon({ ...editingCoupon, autoApply: e.target.checked })}
+                    />
+                    <span>Show as a promotion in the app (no code required)</span>
+                  </label>
                 </div>
               </div>
 
